@@ -1,4 +1,4 @@
-import copy
+import random
 
 
 class GreedyAlgorithm:
@@ -6,14 +6,11 @@ class GreedyAlgorithm:
 
     @staticmethod
     def calculate_objective(x, task):
-        """Допоміжна функція для розрахунку цільової функції (ЦФ) портфеля"""
         total_profit = 0
-        # Базовий прибуток
         for i, proj in enumerate(task.projects):
             if x[i] == 1:
                 total_profit += proj.profit
 
-        # Синергетичні бонуси
         for pair_key, bonus in task.synergies.items():
             id1, id2 = map(int, pair_key.split('_'))
             if x[id1 - 1] == 1 and x[id2 - 1] == 1:
@@ -37,26 +34,23 @@ class GreedyAlgorithm:
 
         for i, p_id, eff in efficiencies:
             if x[i] == 1:
-                continue  # Проєкт вже в портфелі (доданий раніше як підтримка)
+                continue
 
-            cand = {p_id}  # Пакет кандидатів
+            cand = {p_id}
             added_new = True
 
             while added_new:
                 added_new = False
                 for a_id, b_list in task.rules.items():
-                    # Якщо в пакеті є залежний проєкт, а підтримуючого немає ні в портфелі, ні в пакеті
                     if a_id in cand:
                         support_exists_in_x = any(x[b - 1] == 1 for b in b_list)
                         support_exists_in_cand = any(b in cand for b in b_list)
 
                         if not support_exists_in_x and not support_exists_in_cand:
-                            # Шукаємо найкращий проєкт з b_list за ефективністю
                             best_b_id = None
                             best_b_eff = -1
                             for b in b_list:
                                 if b not in cand:
-                                    # Знаходимо ефективність проєкту b
                                     b_eff = next(item[2] for item in efficiencies if item[1] == b)
                                     if b_eff > best_b_eff:
                                         best_b_eff = b_eff
@@ -66,7 +60,6 @@ class GreedyAlgorithm:
                                 cand.add(best_b_id)
                                 added_new = True
 
-            # Перевірка ресурсів для всього пакету
             c_cand = sum(task.projects[p_id_cand - 1].cost for p_id_cand in cand)
             r_cand = sum(task.projects[p_id_cand - 1].risk for p_id_cand in cand)
 
@@ -76,81 +69,155 @@ class GreedyAlgorithm:
                 q_curr += c_cand
                 r_curr += r_cand
 
-        # Обчислення фінального значення ЦФ
         f_best = GreedyAlgorithm.calculate_objective(x, task)
         return x, f_best
 
 
 class LocalSearchAlgorithm:
-    """Клас, що реалізує алгоритм локального пошуку"""
+    """Клас, що реалізує оптимізований алгоритм ЛП (Delta Evaluation)"""
 
     @staticmethod
-    def is_valid(x, task):
-        """Перевірка портфеля на допустимість"""
-        q_curr = sum(task.projects[i].cost for i in range(task.n) if x[i] == 1)
-        r_curr = sum(task.projects[i].risk for i in range(task.n) if x[i] == 1)
+    def solve(task, initial_x, strategy="first", pi=None):
+        if pi is None:
+            pi = 10 * task.n
 
-        if q_curr > task.Q or r_curr > task.R_max:
-            return False
+        costs = [p.cost for p in task.projects]
+        risks = [p.risk for p in task.projects]
+        profits = [p.profit for p in task.projects]
 
-        for a_id, b_list in task.rules.items():
-            if x[a_id - 1] == 1:
-                # Має бути хоча б один підтримуючий проєкт
-                if not any(x[b - 1] == 1 for b in b_list):
-                    return False
-        return True
+        # Швидка карта синергій
+        syn_map = {i: {} for i in range(task.n)}
+        for pair_key, bonus in task.synergies.items():
+            id1, id2 = map(int, pair_key.split('_'))
+            syn_map[id1 - 1][id2 - 1] = bonus
+            syn_map[id2 - 1][id1 - 1] = bonus
 
-    @staticmethod
-    def solve(task, initial_x, strategy="best"):
-        """
-        Локальний пошук з околом Swap та Add/Remove.
-        strategy: "first" (Перше покращення) або "best" (Найкраще покращення)
-        """
-        current_x = copy.deepcopy(initial_x)
-        current_f = GreedyAlgorithm.calculate_objective(current_x, task)
+        current_x = initial_x[:]
 
+        # Обчислення початкового стану
+        current_cost = sum(costs[i] for i in range(task.n) if current_x[i])
+        current_risk = sum(risks[i] for i in range(task.n) if current_x[i])
+        current_profit = GreedyAlgorithm.calculate_objective(current_x, task)
+
+        best_x = current_x[:]
+        best_f = current_profit
+
+        stagnation_counter = 0
         iteration = 0
-        improvement_found = True
 
-        while improvement_found:
-            improvement_found = False
+        while stagnation_counter < pi:
             iteration += 1
-            best_neighbor_x = None
-            best_neighbor_f = current_f
 
             in_portfolio = [i for i in range(task.n) if current_x[i] == 1]
             out_portfolio = [i for i in range(task.n) if current_x[i] == 0]
 
-            neighbors = []
-
-            # 1. Операції Swap
+            operations = []
             for i in in_portfolio:
                 for j in out_portfolio:
-                    neighbor = copy.deepcopy(current_x)
-                    neighbor[i] = 0
-                    neighbor[j] = 1
-                    neighbors.append(neighbor)
-
-            # 2. Операції Add (Пробуємо просто додати проєкт, якщо є бюджет)
+                    operations.append(('swap', i, j))
             for j in out_portfolio:
-                neighbor = copy.deepcopy(current_x)
-                neighbor[j] = 1
-                neighbors.append(neighbor)
+                operations.append(('add', j))
+            for i in in_portfolio:
+                operations.append(('remove', i))
 
-            # Оцінюємо окіл
-            for neighbor in neighbors:
-                if LocalSearchAlgorithm.is_valid(neighbor, task):
-                    neighbor_f = GreedyAlgorithm.calculate_objective(neighbor, task)
-                    if neighbor_f > best_neighbor_f:
-                        best_neighbor_f = neighbor_f
-                        best_neighbor_x = neighbor
-                        if strategy == "first":
-                            break  # Стратегія першого покращення
+            random.shuffle(operations)
 
-            # Якщо знайшли кращий стан, переходимо в нього
-            if best_neighbor_x is not None:
-                current_x = best_neighbor_x
-                current_f = best_neighbor_f
-                improvement_found = True
+            step_best_x = None
+            step_best_f = current_profit
+            step_best_cost = current_cost
+            step_best_risk = current_risk
 
-        return current_x, current_f, iteration
+            valid_neighbors = []
+
+            # --- ОБЧИСЛЕННЯ ЗА ДЕЛЬТОЮ (Миттєве відсікання) ---
+            for op in operations:
+                op_type = op[0]
+
+                if op_type == 'swap':
+                    i, j = op[1], op[2]
+                    new_cost = current_cost - costs[i] + costs[j]
+                    new_risk = current_risk - risks[i] + risks[j]
+                elif op_type == 'add':
+                    j = op[1]
+                    new_cost = current_cost + costs[j]
+                    new_risk = current_risk + risks[j]
+                else:
+                    i = op[1]
+                    new_cost = current_cost - costs[i]
+                    new_risk = current_risk - risks[i]
+
+                if new_cost > task.Q or new_risk > task.R_max:
+                    continue
+
+                neighbor_x = current_x[:]
+                if op_type == 'swap':
+                    neighbor_x[i] = 0;
+                    neighbor_x[j] = 1
+                elif op_type == 'add':
+                    neighbor_x[j] = 1
+                else:
+                    neighbor_x[i] = 0
+
+                # Перевірка логічних правил
+                is_valid = True
+                for a_id, b_list in task.rules.items():
+                    if neighbor_x[a_id - 1] == 1:
+                        if not any(neighbor_x[b - 1] == 1 for b in b_list):
+                            is_valid = False
+                            break
+                if not is_valid:
+                    continue
+
+                new_profit = current_profit
+                if op_type == 'swap':
+                    new_profit = new_profit - profits[i] + profits[j]
+                    # Віднімаємо втрачену синергію
+                    for syn_j, bonus in syn_map[i].items():
+                        if neighbor_x[syn_j] == 1 and syn_j != j:
+                            new_profit -= bonus
+                    # Додаємо нову синергію
+                    for syn_j, bonus in syn_map[j].items():
+                        if neighbor_x[syn_j] == 1 and syn_j != i:
+                            new_profit += bonus
+                elif op_type == 'add':
+                    new_profit += profits[j]
+                    for syn_j, bonus in syn_map[j].items():
+                        if neighbor_x[syn_j] == 1:
+                            new_profit += bonus
+                else:
+                    new_profit -= profits[i]
+                    for syn_j, bonus in syn_map[i].items():
+                        if neighbor_x[syn_j] == 1:
+                            new_profit -= bonus
+
+                # Зберігаємо 5 випадкових валідних сусідів для стрибка зі стагнації
+                if len(valid_neighbors) < 5:
+                    valid_neighbors.append((neighbor_x, new_cost, new_risk, new_profit))
+
+                if new_profit > step_best_f:
+                    step_best_f = new_profit
+                    step_best_x = neighbor_x
+                    step_best_cost = new_cost
+                    step_best_risk = new_risk
+
+                    if strategy == "first":
+                        break
+
+            if step_best_x is not None:
+                current_x = step_best_x
+                current_f = step_best_f
+                current_cost = step_best_cost
+                current_risk = step_best_risk
+
+                if current_f > best_f:
+                    best_f = current_f
+                    best_x = current_x[:]
+                    stagnation_counter = 0
+                else:
+                    stagnation_counter += 1
+            else:
+                stagnation_counter += 1
+                if valid_neighbors:
+                    current_x, current_cost, current_risk, current_f = random.choice(valid_neighbors)
+
+        return best_x, best_f, iteration
