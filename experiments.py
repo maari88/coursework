@@ -124,7 +124,7 @@ class ExperimentRunner:
                 task = TaskGenerator.generate_task(n=n, cr=0.5, p_syn=0.3, sr=0.3)
                 x_g, f_g = GreedyAlgorithm.solve(task)
                 start = time.perf_counter()
-                x_ls, f_ls, _ = LocalSearchAlgorithm.solve(task, x_g, strategy="first")
+                x_ls, f_ls, _ = LocalSearchAlgorithm.solve(task, x_g, strategy="first", pi=pi)
                 t_total += (time.perf_counter() - start) * 1000
                 f_total += f_ls
             times.append(t_total / r_repeats)
