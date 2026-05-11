@@ -97,10 +97,11 @@ class LocalSearchAlgorithm:
         # Обчислення початкового стану
         current_cost = sum(costs[i] for i in range(task.n) if current_x[i])
         current_risk = sum(risks[i] for i in range(task.n) if current_x[i])
-        current_profit = GreedyAlgorithm.calculate_objective(current_x, task)
+
+        current_f = GreedyAlgorithm.calculate_objective(current_x, task)
 
         best_x = current_x[:]
-        best_f = current_profit
+        best_f = current_f
 
         stagnation_counter = 0
         iteration = 0
@@ -123,13 +124,13 @@ class LocalSearchAlgorithm:
             random.shuffle(operations)
 
             step_best_x = None
-            step_best_f = current_profit
+            step_best_f = current_f
             step_best_cost = current_cost
             step_best_risk = current_risk
 
             valid_neighbors = []
 
-            # --- ОБЧИСЛЕННЯ ЗА ДЕЛЬТОЮ (Миттєве відсікання) ---
+            # --- ОБЧИСЛЕННЯ ЗА ДЕЛЬТОЮ ---
             for op in operations:
                 op_type = op[0]
 
@@ -151,7 +152,7 @@ class LocalSearchAlgorithm:
 
                 neighbor_x = current_x[:]
                 if op_type == 'swap':
-                    neighbor_x[i] = 0;
+                    neighbor_x[i] = 0
                     neighbor_x[j] = 1
                 elif op_type == 'add':
                     neighbor_x[j] = 1
@@ -168,14 +169,13 @@ class LocalSearchAlgorithm:
                 if not is_valid:
                     continue
 
-                new_profit = current_profit
+                new_profit = current_f
+
                 if op_type == 'swap':
                     new_profit = new_profit - profits[i] + profits[j]
-                    # Віднімаємо втрачену синергію
                     for syn_j, bonus in syn_map[i].items():
                         if neighbor_x[syn_j] == 1 and syn_j != j:
                             new_profit -= bonus
-                    # Додаємо нову синергію
                     for syn_j, bonus in syn_map[j].items():
                         if neighbor_x[syn_j] == 1 and syn_j != i:
                             new_profit += bonus
@@ -190,7 +190,6 @@ class LocalSearchAlgorithm:
                         if neighbor_x[syn_j] == 1:
                             new_profit -= bonus
 
-                # Зберігаємо 5 випадкових валідних сусідів для стрибка зі стагнації
                 if len(valid_neighbors) < 5:
                     valid_neighbors.append((neighbor_x, new_cost, new_risk, new_profit))
 
@@ -220,4 +219,5 @@ class LocalSearchAlgorithm:
                 if valid_neighbors:
                     current_x, current_cost, current_risk, current_f = random.choice(valid_neighbors)
 
-        return best_x, best_f, iteration
+        actual_best_f = GreedyAlgorithm.calculate_objective(best_x, task)
+        return best_x, actual_best_f, iteration
